@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Data Quality Report – {{ suite }}</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #1d2330; --muted: #667085; --line: #e4e7ec;
+    --good: #12805c; --good-bg: #e3f5ed; --warn: #a15c00; --warn-bg: #fdf1dc;
+    --bad: #b42318; --bad-bg: #fde8e6; --err: #5b3bb0; --err-bg: #eee8fb; --accent: #2e5aac;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #11141a; --card: #1a1e26; --text: #e6e8ec; --muted: #98a2b3; --line: #2b313c;
+      --good: #4cc79a; --good-bg: #133528; --warn: #f0b252; --warn-bg: #3a2c12;
+      --bad: #f37a70; --bad-bg: #3d1a17; --err: #b49cf5; --err-bg: #2a2142; --accent: #7fa7ef;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 14px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 1200px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 16px; margin: 32px 0 12px; }
+  .muted { color: var(--muted); }
+  .meta { color: var(--muted); font-size: 13px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 16px; }
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin-top: 20px; }
+  .kpi .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; }
+  .kpi .value { font-size: 28px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .kpi.score .value { font-size: 40px; }
+  .spark { color: var(--accent); vertical-align: middle; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; background: var(--card); }
+  th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; font-weight: 600; white-space: nowrap; }
+  .PASS, .GOOD { color: var(--good); background: var(--good-bg); }
+  .WARN, .ATTENTION { color: var(--warn); background: var(--warn-bg); }
+  .FAIL, .CRITICAL { color: var(--bad); background: var(--bad-bg); }
+  .ERROR { color: var(--err); background: var(--err-bg); }
+  td.cell { text-align: center; font-weight: 600; font-variant-numeric: tabular-nums; }
+  code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12px; }
+  details { margin-top: 4px; }
+  summary { cursor: pointer; color: var(--accent); font-size: 12px; }
+  pre { margin: 6px 0 0; padding: 8px; background: var(--bg); border-radius: 6px; overflow-x: auto;
+        font: 12px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre; }
+  .small { font-size: 12px; }
+  footer { margin-top: 40px; color: var(--muted); font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Data Quality Report · {{ suite }}</h1>
+  <div class="meta">Run <code>{{ run_id }}</code> · {{ run_ts.strftime("%Y-%m-%d %H:%M:%S") }}</div>
+
+  <section class="kpis">
+    <div class="card kpi score">
+      <div class="label">Overall quality score</div>
+      <div class="value">{{ "%.1f"|format(overall.score if overall else 100) }}</div>
+      {% if overall %}<span class="badge {{ overall.rating }}">{{ overall.rating }}</span>{% endif %}
+      <div style="margin-top:8px">{{ suite_trend }}</div>
+    </div>
+    <div class="card kpi">
+      <div class="label">Rules evaluated</div>
+      <div class="value">{{ rules|length }}</div>
+      <div class="small">
+        <span class="badge PASS">{{ counts.PASS }} pass</span>
+        <span class="badge WARN">{{ counts.WARN }} warn</span>
+        <span class="badge FAIL">{{ counts.FAIL }} fail</span>
+        {% if counts.ERROR %}<span class="badge ERROR">{{ counts.ERROR }} error</span>{% endif %}
+      </div>
+    </div>
+    <div class="card kpi">
+      <div class="label">Rows checked</div>
+      <div class="value">{{ total_checked|num }}</div>
+      <div class="small muted">{{ total_failed|num }} rows failed</div>
+    </div>
+    <div class="card kpi">
+      <div class="label">Tables</div>
+      <div class="value">{{ tables|length }}</div>
+      <div class="small muted">{{ dim_names|length }} quality dimensions</div>
+    </div>
+  </section>
+
+  <h2>Quality index per table</h2>
+  <div class="table-wrap card" style="padding:0">
+    <table>
+      <thead><tr><th>Table</th><th class="num">Score</th><th>Rating</th><th class="num">Rules</th><th class="num">Not passed</th><th>Trend (last runs)</th></tr></thead>
+      <tbody>
+      {% for t in tables %}
+        <tr>
+          <td><strong>{{ t.table_name }}</strong></td>
+          <td class="num">{{ "%.1f"|format(t.score) }}</td>
+          <td><span class="badge {{ t.rating }}">{{ t.rating }}</span></td>
+          <td class="num">{{ t.rules_evaluated }}</td>
+          <td class="num">{{ t.rules_not_passed }}</td>
+          <td>{{ t.trend }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <h2>Quality index per table and dimension</h2>
+  <div class="table-wrap card" style="padding:0">
+    <table>
+      <thead><tr><th>Table</th>{% for d in dim_names %}<th class="num">{{ d }}</th>{% endfor %}</tr></thead>
+      <tbody>
+      {% for row in matrix %}
+        <tr>
+          <td><strong>{{ row.table }}</strong></td>
+          {% for c in row.cells %}
+            {% if c %}<td class="cell"><span class="badge {{ c.rating }}">{{ "%.1f"|format(c.score) }}</span></td>
+            {% else %}<td class="cell muted">–</td>{% endif %}
+          {% endfor %}
+        </tr>
+      {% endfor %}
+        <tr>
+          <td><strong>All tables</strong></td>
+          {% for d in dimensions %}<td class="cell"><span class="badge {{ d.rating }}">{{ "%.1f"|format(d.score) }}</span></td>{% endfor %}
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h2>Rule results</h2>
+  <div class="table-wrap card" style="padding:0">
+    <table>
+      <thead><tr>
+        <th>Status</th><th>Rule</th><th>Table</th><th>Type</th><th>Dimension</th><th>Severity</th>
+        <th class="num">Checked</th><th class="num">Failed</th><th class="num">Pass rate</th><th>Owner</th>
+      </tr></thead>
+      <tbody>
+      {% for r in rules %}
+        <tr>
+          <td><span class="badge {{ r.status }}">{{ r.status }}</span></td>
+          <td>
+            <code>{{ r.rule_id }}</code><br><span class="small">{{ r.description }}</span>
+            {% if r.details %}<br><span class="small muted">{{ r.details }}</span>{% endif %}
+            {% if r.error_message %}<br><span class="small" style="color:var(--err)">{{ r.error_message }}</span>{% endif %}
+            {% if samples.get(r.rule_id) %}
+              <details><summary>{{ samples[r.rule_id]|length }} sample failed row(s)</summary>
+                <pre>{% for s in samples[r.rule_id] %}{{ s }}
+{% endfor %}</pre>
+              </details>
+            {% endif %}
+          </td>
+          <td>{{ r.table_name }}</td>
+          <td><code>{{ r.rule_type }}</code></td>
+          <td>{{ r.dimension }}</td>
+          <td>{{ r.severity }}</td>
+          <td class="num">{{ r.rows_checked|num }}</td>
+          <td class="num">{{ r.rows_failed|num }}</td>
+          <td class="num">{{ r.pass_rate|pct }}</td>
+          <td class="small" style="white-space:nowrap">{{ r.owner }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if skipped %}
+  <h2>Inactive rules (not run)</h2>
+  <p class="small muted">
+    {% for r in skipped %}<code>{{ r.id }}</code> ({{ r.table }}){% if not loop.last %}, {% endif %}{% endfor %}
+  </p>
+  {% endif %}
+
+  <footer>
+    Score = severity-weighted average of rule pass rates (0–100). GOOD ≥ {{ "%g"|format(ratings.good) }}, ATTENTION ≥ {{ "%g"|format(ratings.attention) }}, CRITICAL below {{ "%g"|format(ratings.attention) }}.
+    Generated {{ generated_at.strftime("%Y-%m-%d %H:%M:%S") }} by data-quality-framework.
+  </footer>
+</main>
+</body>
+</html>

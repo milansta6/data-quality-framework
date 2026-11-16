@@ -1,0 +1,60 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "data-quality-framework"
+version = "0.1.0"
+description = "A small, config-driven data quality framework for PySpark and SQL."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Milan Stamenovic" }]
+requires-python = ">=3.9"
+keywords = ["data quality", "pyspark", "databricks", "delta lake", "data engineering"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Database",
+]
+# PySpark is intentionally NOT a hard dependency: Databricks ships its own Spark,
+# and installing a second copy there causes conflicts. Use the [spark] extra locally.
+dependencies = [
+    "pyyaml>=6.0",
+    "jinja2>=3.1",
+]
+
+[project.optional-dependencies]
+spark = ["pyspark>=3.4"]
+local = ["pyspark>=3.4", "pyarrow>=12"]
+dev = [
+    "pyspark>=3.4",
+    "pyarrow>=12",
+    "pytest>=7.4",
+    "ruff>=0.5",
+]
+
+[project.scripts]
+dq = "dq.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/milansta6/data-quality-framework"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+dq = ["templates/*.html"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+extend-exclude = ["notebooks"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "SIM"]
+ignore = ["SIM108"]  # nested ternaries are harder to read than if/else
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

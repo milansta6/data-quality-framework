@@ -1,0 +1,178 @@
+# Demo rule suite for the synthetic customers / accounts / transactions data.
+# Run it locally with:   dq run examples/demo_suite.yml --demo-data
+#
+# Every rule has the same common fields:
+#   id, table, type, description, severity (warning|error), active, owner,
+#   dimension (completeness|validity|uniqueness|consistency|timeliness), threshold (0-1)
+# All other keys are parameters of the rule type.
+
+suite: retail_demo
+
+defaults:            # applied to every rule unless the rule overrides it
+  owner: data-quality-team
+  severity: error
+  active: true
+
+output:
+  path: dq_output    # folder (local, DBFS, S3, ADLS ...); or set `database:` for catalog tables
+  format: parquet    # parquet | delta
+  sample_size: 10    # failed rows kept per rule
+
+scoring:
+  weights: {error: 2, warning: 1}
+  ratings: {good: 95, attention: 80}
+
+rules:
+  # ------------------------------------------------------------------ customers
+  - id: CUST_001
+    table: customers
+    type: not_null
+    columns: [customer_id, first_name, last_name]
+    description: Core customer attributes must always be filled
+    dimension: completeness
+
+  - id: CUST_002
+    table: customers
+    type: not_null
+    column: email
+    treat_blank_as_null: true
+    threshold: 0.98          # up to 2% missing e-mails is acceptable
+    severity: warning
+    description: Customers should have an e-mail address
+    owner: crm-team
+
+  - id: CUST_003
+    table: customers
+    type: unique
+    column: customer_id
+    description: Customer id must be unique
+
+  - id: CUST_004
+    table: customers
+    type: regex
+    column: email
+    pattern: '^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$'
+    description: E-mail must have a valid format
+    severity: warning
+    owner: crm-team
+
+  - id: CUST_005
+    table: customers
+    type: accepted_values
+    column: country
+    values: [DE, AT, CH, FR, NL, IT, ES, RS]
+    description: Country must be a supported ISO country code
+
+  - id: CUST_006
+    table: customers
+    type: range
+    column: birth_date
+    min: "1900-01-01"
+    max: "2010-12-31"
+    description: Birth date must be plausible (customers are adults)
+
+  # ------------------------------------------------------------------ accounts
+  - id: ACC_001
+    table: accounts
+    type: referential_integrity
+    column: customer_id
+    reference_table: customers
+    description: Every account must belong to a known customer
+
+  - id: ACC_002
+    table: accounts
+    type: accepted_values
+    column: currency
+    values: [EUR, USD, CHF, GBP]
+    description: Account currency must be an ISO currency code
+
+  - id: ACC_003
+    table: accounts
+    type: range
+    column: balance
+    min: 0
+    filter: "account_type = 'SAVINGS'"    # any rule can be limited with a SQL filter
+    description: Savings accounts cannot have a negative balance
+
+  - id: ACC_004
+    table: accounts
+    type: custom_sql
+    sql: |
+      SELECT * FROM accounts
+      WHERE status = 'CLOSED' AND balance <> 0
+    description: Closed accounts must have a zero balance
+    dimension: consistency
+
+  - id: ACC_005
+    table: accounts
+    type: freshness
+    column: updated_at
+    max_age_hours: 24
+    severity: warning
+    description: Accounts must be refreshed at least daily
+
+  # ------------------------------------------------------------------ transactions
+  - id: TRX_001
+    table: transactions
+    type: unique
+    column: transaction_id
+    description: Transaction id must be unique
+
+  - id: TRX_002
+    table: transactions
+    type: range
+    column: amount
+    min: -1000000
+    max: 1000000
+    description: Amounts above 1M are not expected for retail transactions
+    severity: warning
+
+  - id: TRX_003
+    table: transactions
+    type: referential_integrity
+    column: account_id
+    reference_table: accounts
+    description: Every transaction must reference a known account
+
+  - id: TRX_004
+    table: transactions
+    type: freshness
+    column: ingested_at
+    max_age_hours: 6
+    description: Transactions must be loaded at least every 6 hours
+
+  - id: TRX_005
+    table: transactions
+    type: custom_sql
+    depends_on: [accounts]
+    sql: |
+      SELECT t.*
+      FROM transactions t
+      JOIN accounts a ON t.account_id = a.account_id
+      WHERE CAST(t.transaction_ts AS DATE) < a.opened_date
+    description: A transaction cannot be booked before the account was opened
+    dimension: consistency
+
+  # Bronze -> Silver reconciliation
+  - id: REC_001
+    table: transactions_raw
+    type: row_count_reconciliation
+    target_table: transactions
+    tolerance: 0
+    severity: warning
+    description: All raw transactions must arrive in the Silver layer
+
+  - id: REC_002
+    table: transactions_raw
+    type: sum_reconciliation
+    column: amount
+    target_table: transactions
+    tolerance_pct: 0.5
+    description: Total amount must match between Bronze and Silver (0.5% tolerance)
+
+  - id: REC_003
+    table: transactions_raw
+    type: not_null
+    column: account_id
+    active: false             # switched off: shown in the report as inactive
+    description: Example of a deactivated rule
